@@ -66,3 +66,8 @@ functions:
           - s3:PutObject
           - s3:GetObject
         Resource: arn:aws:s3:::${self:provider.environment.BD_REPORT_BUCKET}/baselines/*
+      # ListBucket so a missing baseline returns 404 (NoSuchKey) not 403 AccessDenied
+      - Effect: Allow
+        Action:
+          - s3:ListBucket
+        Resource: arn:aws:s3:::${self:provider.environment.BD_REPORT_BUCKET}

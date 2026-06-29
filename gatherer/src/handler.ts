@@ -17,7 +17,10 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 async function gatherProject(project: ProjectConfig, nowMs: number): Promise<ProjectPack> {
   const [run, baseline, queues, proxy, completed24h] = await Promise.all([
     detectRun(project),
-    ensureBaseline(project),
+    ensureBaseline(project).catch((e) => {
+      console.error(`baseline failed for ${project.app}:`, e);
+      return null;
+    }),
     getQueueMetrics(project.queues, nowMs),
     getProxyHealth(project, nowMs),
     countEventsBetween(project.app, project.completedEvent.eventType, nowMs - DAY_MS, nowMs),
