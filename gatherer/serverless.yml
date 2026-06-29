@@ -1,0 +1,68 @@
+service: bd-daily-report-gatherer
+
+frameworkVersion: '4'
+
+plugins:
+  - serverless-iam-roles-per-function
+
+custom:
+  resources: ${file(../config/config.${self:provider.stage}.yml)}
+
+provider:
+  name: aws
+  runtime: nodejs20.x
+  stage: ${opt:stage, 'prod'}
+  region: ${opt:region, 'eu-west-1'}
+  profile: ${self:custom.resources.profile}
+  environment:
+    UNIFIED_EVENTS_TABLE: ${ssm:${self:custom.resources.ssm.parameterNames.unifiedEvents}}
+    TENANT_ID: ${self:custom.resources.tenantId}
+    BD_REPORT_BUCKET: ${self:custom.resources.s3.reportBucket}-${aws:accountId}
+
+functions:
+  gatherer:
+    handler: src/handler.handler
+    timeout: 300
+    memorySize: 512
+    description: Daily cross-project scrape progress + cost + perf gatherer; writes pack.json to S3
+    events:
+      - schedule: cron(0 6 * * ? *) # daily 06:00 UTC
+    iamRoleStatements:
+      # read events from the shared unifiedEvents table (table + all GSIs)
+      - Effect: Allow
+        Action:
+          - dynamodb:Query
+        Resource:
+          - arn:aws:dynamodb:${self:provider.region}:${aws:accountId}:table/${self:provider.environment.UNIFIED_EVENTS_TABLE}
+          - arn:aws:dynamodb:${self:provider.region}:${aws:accountId}:table/${self:provider.environment.UNIFIED_EVENTS_TABLE}/index/*
+      # cost (global service, no resource-level scoping possible)
+      - Effect: Allow
+        Action:
+          - ce:GetCostAndUsage
+        Resource: '*'
+      # lambda perf metrics + config (GetMetricData/ListMetrics cannot be ARN-scoped)
+      - Effect: Allow
+        Action:
+          - cloudwatch:GetMetricData
+          - cloudwatch:ListMetrics
+          - lambda:ListFunctions
+          - lambda:GetFunctionConfiguration
+        Resource: '*'
+      # logs insights for memory over-provisioning
+      - Effect: Allow
+        Action:
+          - logs:StartQuery
+          - logs:GetQueryResults
+          - logs:StopQuery
+          - logs:DescribeLogGroups
+        Resource: '*'
+      # write pack + read/write frozen baselines (only this bucket's prefixes)
+      - Effect: Allow
+        Action:
+          - s3:PutObject
+        Resource: arn:aws:s3:::${self:provider.environment.BD_REPORT_BUCKET}/packs/*
+      - Effect: Allow
+        Action:
+          - s3:PutObject
+          - s3:GetObject
+        Resource: arn:aws:s3:::${self:provider.environment.BD_REPORT_BUCKET}/baselines/*

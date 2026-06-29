@@ -1,0 +1,14 @@
+{
+  "name": "bd-daily-report",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Daily cross-project scrape progress + cost + perf report (gatherer Lambda + Claude cloud routine)",
+  "workspaces": [
+    "gatherer",
+    "routine"
+  ],
+  "scripts": {
+    "gather:local": "npm run gather:local --workspace gatherer",
+    "deploy:prod": "npm run deploy:prod --workspace gatherer"
+  }
+}

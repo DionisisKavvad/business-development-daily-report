@@ -1,0 +1,15 @@
+# config.prod.yml
+profile: equalityAdmin
+
+ssm:
+  parameterNames:
+    unifiedEvents: /prod/core/unifiedEvents-table
+    slackBotToken: /prod/facebook-ads/slack-bot-token
+    # reuse the existing daily-progress channel (same as the per-project reports)
+    reportChannel: /prod/facebook-ads/slack-report-channel
+
+# report output bucket (private, SSE, block-public). Created manually, see README.
+s3:
+  reportBucket: bd-daily-reports
+
+tenantId: gbinnovations

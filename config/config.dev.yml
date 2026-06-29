@@ -1,0 +1,13 @@
+# config.dev.yml
+profile: gbInnovationsDeveloper
+
+ssm:
+  parameterNames:
+    unifiedEvents: /dev/core/unifiedEvents-table
+    slackBotToken: /prod/facebook-ads/slack-bot-token
+    reportChannel: /prod/facebook-ads/slack-report-channel
+
+s3:
+  reportBucket: bd-daily-reports-dev
+
+tenantId: gbinnovations

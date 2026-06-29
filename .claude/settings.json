@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(./**/.env)",
+      "Read(./**/.env.*)",
+      "Read(~/.aws/**)",
+      "Read(./**/*credentials*)",
+      "Bash(env)",
+      "Bash(printenv:*)",
+      "Bash(aws iam *)",
+      "Bash(aws sts *)"
+    ]
+  }
+}
