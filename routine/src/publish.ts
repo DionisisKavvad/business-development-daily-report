@@ -47,6 +47,11 @@ async function main() {
       ? `${insights.findings.length} finding(s), ${criticalCount} critical`
       : 'all nominal';
 
+  if (process.argv.includes('--no-slack')) {
+    console.log(`published ${key} (Slack skipped). Presigned URL:\n${url}`);
+    return;
+  }
+
   await postReportLink({ date: pack.date, url, oneLiner, criticalCount });
   console.log(`published ${key} and posted to Slack`);
 }
