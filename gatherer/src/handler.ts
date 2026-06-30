@@ -1,6 +1,7 @@
 import { PROJECTS, ProjectConfig } from './projects';
 import { detectRun } from './modules/detector';
 import { computeProgress } from './modules/progress';
+import { computeCoverage } from './modules/coverage';
 import { ensureBaseline } from './modules/baseline';
 import { getQueueMetrics } from './modules/queue';
 import { getProxyHealth } from './modules/proxyhealth';
@@ -26,10 +27,13 @@ async function gatherProject(project: ProjectConfig, nowMs: number): Promise<Pro
     countEventsBetween(project.app, project.completedEvent.eventType, nowMs - DAY_MS, nowMs),
   ]);
 
-  const progress =
+  const [progress, coverage] =
     run.active && run.runStartMs
-      ? await computeProgress(project, run.runStartMs, nowMs)
-      : undefined;
+      ? await Promise.all([
+          computeProgress(project, run.runStartMs, nowMs),
+          computeCoverage(project, run.runStartMs, nowMs, run.universe ?? null),
+        ])
+      : [undefined, undefined];
 
   // balance per queue; the main (first) queue is compared against stored terminals.
   const balance = queues.map((q, i) =>
@@ -39,6 +43,9 @@ async function gatherProject(project: ProjectConfig, nowMs: number): Promise<Pro
       deleted: q.deleted,
       oldestAgeSec: q.oldestAgeSec,
       storedTerminal: i === 0 ? completed24h : q.deleted, // only main queue maps to terminals
+      visibleMax: q.visibleMax,
+      cliffDays: q.cliffDays,
+      dlq: q.dlq,
     })
   );
 
@@ -50,6 +57,7 @@ async function gatherProject(project: ProjectConfig, nowMs: number): Promise<Pro
     runStartMs: run.runStartMs,
     dayNumber: run.runStartMs ? Math.floor((nowMs - run.runStartMs) / DAY_MS) + 1 : undefined,
     progress,
+    coverage,
     baseline,
     queues,
     balance,

@@ -9,6 +9,8 @@ export interface RunState {
   runStartMs?: number;
   /** ms timestamp of the last completed run's start (for baseline pairing) */
   lastCompletedRunStartMs?: number;
+  /** total stores enqueued for this run (from Run Started properties), if present */
+  universe?: number;
 }
 
 /**
@@ -28,6 +30,8 @@ export async function detectRun(project: ProjectConfig): Promise<RunState> {
   const startedMs: number = started.timestamp;
   const completedMs: number | undefined = completed?.timestamp;
   const active = completedMs === undefined || startedMs > completedMs;
+  const universe =
+    typeof started.properties?.totalStores === 'number' ? started.properties.totalStores : undefined;
 
   return {
     active,
@@ -36,5 +40,6 @@ export async function detectRun(project: ProjectConfig): Promise<RunState> {
     // when the current run is active, the previous completion marks the baseline run;
     // when idle, the latest started run is itself the last completed one.
     lastCompletedRunStartMs: active ? undefined : startedMs,
+    universe,
   };
 }

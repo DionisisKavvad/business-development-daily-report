@@ -10,12 +10,28 @@
 import * as fs from 'fs';
 import { renderHtml } from './render';
 import { Pack, Insights } from './types';
-import { putHtml, presign } from './lib/s3';
+import { putHtml, presign, getText } from './lib/s3';
 import { postReportLink } from './lib/slack';
 
 function arg(flag: string): string | undefined {
   const i = process.argv.indexOf(flag);
   return i >= 0 ? process.argv[i + 1] : undefined;
+}
+
+/** YYYY-MM-DD of the day before `date`. */
+function prevDate(date: string): string {
+  const d = new Date(date + 'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
+/** Yesterday's pack from S3 for vs-yesterday deltas (null if missing/unreadable). */
+async function loadPrevPack(date: string): Promise<Pack | null> {
+  try {
+    return JSON.parse(await getText(`packs/${prevDate(date)}.json`)) as Pack;
+  } catch {
+    return null;
+  }
 }
 
 async function main() {
@@ -28,14 +44,20 @@ async function main() {
 
   const pack = JSON.parse(fs.readFileSync(packPath, 'utf8')) as Pack;
   const insights = JSON.parse(fs.readFileSync(insightsPath, 'utf8')) as Insights;
-  const html = renderHtml(pack, insights);
 
   if (dryRun) {
+    // allow a local prev pack via --prev for offline delta testing
+    const prevPath = arg('--prev');
+    const prev = prevPath ? (JSON.parse(fs.readFileSync(prevPath, 'utf8')) as Pack) : null;
+    const html = renderHtml(pack, insights, prev);
     const out = arg('--out') || `./report-${pack.date}.html`;
     fs.writeFileSync(out, html);
     console.log(`[dry-run] wrote ${out} (${html.length} bytes)`);
     return;
   }
+
+  const prev = await loadPrevPack(pack.date);
+  const html = renderHtml(pack, insights, prev);
 
   const key = `html/${pack.date}.html`;
   await putHtml(key, html);

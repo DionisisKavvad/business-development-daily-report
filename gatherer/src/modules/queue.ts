@@ -1,12 +1,16 @@
 import { CloudWatchClient, GetMetricDataCommand, MetricDataQuery } from '@aws-sdk/client-cloudwatch';
+import { SQSClient, GetQueueUrlCommand, GetQueueAttributesCommand } from '@aws-sdk/client-sqs';
 
 /**
- * SQS health via CloudWatch (namespace AWS/SQS, dimension QueueName) — no SQS
- * permission needed. `sent` vs `deleted` vs stored terminal events reveals
- * silent loss; `oldestAgeSec` near retention reveals stuck batches.
+ * SQS health: throughput via CloudWatch (namespace AWS/SQS), config via SQS
+ * GetQueueAttributes. `sent` vs `deleted` reveals silent loss; `oldestAgeSec`
+ * vs `retentionSec` gives the retention cliff (days until messages expire);
+ * absence of a redrive policy (`dlq=false`) means failed messages recycle until
+ * they expire — the structural enabler of silent loss.
  */
 const DAY_MS = 24 * 60 * 60 * 1000;
 const cw = new CloudWatchClient({ region: process.env.AWS_REGION });
+const sqs = new SQSClient({ region: process.env.AWS_REGION });
 
 export interface QueueMetrics {
   queue: string;
@@ -14,6 +18,35 @@ export interface QueueMetrics {
   deleted: number;
   visibleMax: number | null;
   oldestAgeSec: number | null;
+  /** message retention period in seconds (config), null if unreadable */
+  retentionSec: number | null;
+  /** days until the oldest message expires (retention − oldestAge), null if unknown */
+  cliffDays: number | null;
+  /** whether the queue has a dead-letter redrive policy */
+  dlq: boolean | null;
+}
+
+/** Read static queue config (retention, redrive policy). Best-effort per queue. */
+async function getQueueConfig(
+  queue: string
+): Promise<{ retentionSec: number | null; dlq: boolean | null }> {
+  try {
+    const { QueueUrl } = await sqs.send(new GetQueueUrlCommand({ QueueName: queue }));
+    if (!QueueUrl) return { retentionSec: null, dlq: null };
+    const { Attributes } = await sqs.send(
+      new GetQueueAttributesCommand({
+        QueueUrl,
+        AttributeNames: ['MessageRetentionPeriod', 'RedrivePolicy'],
+      })
+    );
+    const retention = Attributes?.MessageRetentionPeriod;
+    return {
+      retentionSec: retention !== undefined ? Number(retention) : null,
+      dlq: Attributes ? Boolean(Attributes.RedrivePolicy) : null,
+    };
+  } catch {
+    return { retentionSec: null, dlq: null };
+  }
 }
 
 const STATS: { suffix: string; metric: string; stat: string }[] = [
@@ -62,17 +95,28 @@ export async function getQueueMetrics(queueNames: string[], nowMs: number): Prom
     nextToken = res.NextToken;
   } while (nextToken);
 
+  const configs = await Promise.all(queueNames.map((q) => getQueueConfig(q)));
+
   return queueNames.map((q, i) => {
     const v = (suffix: string): number | null => {
       const x = values[`q${i}_${suffix}`];
       return x === undefined ? null : x;
     };
+    const oldestAgeSec = v('age');
+    const { retentionSec, dlq } = configs[i];
+    const cliffDays =
+      oldestAgeSec !== null && retentionSec !== null
+        ? (retentionSec - oldestAgeSec) / 86400
+        : null;
     return {
       queue: q,
       sent: v('sent') || 0,
       deleted: v('del') || 0,
       visibleMax: v('vis'),
-      oldestAgeSec: v('age'),
+      oldestAgeSec,
+      retentionSec,
+      cliffDays,
+      dlq,
     };
   });
 }

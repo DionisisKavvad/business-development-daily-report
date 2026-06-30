@@ -56,6 +56,12 @@ functions:
           - logs:StopQuery
           - logs:DescribeLogGroups
         Resource: '*'
+      # SQS config (DLQ presence + retention period) for the scraper queues
+      - Effect: Allow
+        Action:
+          - sqs:GetQueueUrl
+          - sqs:GetQueueAttributes
+        Resource: arn:aws:sqs:${self:provider.region}:${aws:accountId}:*
       # write pack + read/write frozen baselines (only this bucket's prefixes)
       - Effect: Allow
         Action:

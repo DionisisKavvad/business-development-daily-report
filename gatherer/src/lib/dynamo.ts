@@ -94,6 +94,54 @@ export async function latestEventBefore(
   return res.Items && res.Items.length > 0 ? res.Items[0] : null;
 }
 
+/** sentinel store id used by projects that don't track per-store identity */
+const UNKNOWN_STORE = 'UNKNOWN_STORE';
+
+/**
+ * Count DISTINCT stores emitting an event type within a window. The store id is
+ * read from `GSI1PK` (`STORE#<id>`), present on every event. The completedEvent
+ * fires once per processed message, so its raw count is inflated by
+ * retries/re-injections; the distinct store count is the true stores-touched.
+ *
+ * Returns `{ distinct, total, unknown }`: `unknown` counts events whose store id
+ * is the UNKNOWN_STORE sentinel (some projects, e.g. ads, don't carry a store id
+ * on this event) so the caller can tell "0 stores" from "not measurable".
+ */
+export async function distinctStoresBetween(
+  app: string,
+  eventType: string,
+  fromMs: number,
+  toMs: number = Number(MAX_TS)
+): Promise<{ distinct: number; total: number; unknown: number }> {
+  const seen = new Set<string>();
+  let total = 0;
+  let unknown = 0;
+  let lastKey: Record<string, any> | undefined;
+  do {
+    const params: QueryCommandInput = {
+      TableName: TABLE,
+      IndexName: GSI6,
+      KeyConditionExpression: 'GSI6PK = :pk AND GSI6SK BETWEEN :start AND :end',
+      ExpressionAttributeValues: {
+        ':pk': `EVENT#${eventType}`,
+        ':start': `${skPrefix(app)}TIMESTAMP#${fromMs}`,
+        ':end': `${skPrefix(app)}TIMESTAMP#${toMs}`,
+      },
+      ProjectionExpression: 'GSI1PK',
+      ExclusiveStartKey: lastKey,
+    };
+    const res = await docClient.send(new QueryCommand(params));
+    for (const it of res.Items || []) {
+      total += 1;
+      const id = typeof it.GSI1PK === 'string' ? it.GSI1PK.replace(/^STORE#/, '') : '';
+      if (!id || id === UNKNOWN_STORE) unknown += 1;
+      else seen.add(id);
+    }
+    lastKey = res.LastEvaluatedKey;
+  } while (lastKey);
+  return { distinct: seen.size, total, unknown };
+}
+
 /**
  * Fetch items (not COUNT) of a type for an app within a window, projecting only
  * `timestamp`. Used for bucketing by day. Paginates. Returns timestamps (ms).

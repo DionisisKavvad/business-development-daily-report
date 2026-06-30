@@ -16,29 +16,42 @@ You are generating the daily Business Development scrape report. Work in `routin
    (If this fails because no pack exists yet, stop and report that the gatherer has not run.)
 3. Read `/tmp/pack.json`. It is already aggregated/projected (counts, ratios, timestamps —
    no raw content). Investigate it like an SRE. Specifically look for:
+   - **Store-level coverage (the headline silent-loss signal)**: per project, `coverage`
+     (active run) or `baseline.coverage` (idle). `neverProcessed` = `universe` − `processedDistinct`
+     is stores enqueued but never finished — treat a non-zero `neverProcessed` as CRITICAL/WARN by
+     size. `reprocessRatio` >1 means retries/wasted work. If `measurable` is false, the project's
+     completedEvent carries no store id — say coverage can't be measured, do NOT invent a number.
+   - **Counter-vs-reality divergence**: `coverage.processedEvents` (raw count, what the run's own
+     report brags) vs `coverage.processedDistinct` (true stores). A big gap = inflated reporting.
    - **Undercounting / data-quality**: any project where `progress.yields[].perStore` diverges
      sharply (>25%) from `baseline.yields[].perStore`. A yield that dropped and stayed low is the
      months-long-bug signature. A yield of ~1.0 ads/store or exactly N is suspicious (limit bug).
    - **Within-run break**: in `progress.dailyBreakdown`, a sudden drop in `storesCompleted` or
      `primaryYield`, or a spike in `errors` (rate-limit stall, duplicate spike).
-   - **Silent loss / queue health**: `balance[].flags` — `possible-silent-loss`,
-     `completion-mismatch`, `stuck-batch`. Treat stuck-batch (near 14d retention) as CRITICAL.
-   - **Proxies down (machines off)**: a project that is `active` with heavy-fn invocations up in
-     `perf` but `storesCompleted`/yield ≈ 0 and Duration near max, and/or high `proxy.totalProxyEvents`.
-   - **Cost / perf regressions**: `cost.byService` week-over-week jumps; `perf[]` high error rate,
-     throttles > 0, p99 spikes; `overprovision` rows >80% (bump) or <35% (over-provisioned).
+   - **Silent loss / queue health**: `balance[].flags` — `consumer-stall` (visible>0 but 0 deleted:
+     the earliest dead-consumer signal), `retention-cliff` (`queues[].cliffDays` ≤ 3: messages about
+     to expire — CRITICAL), `no-DLQ` (failed messages recycle until expiry), `possible-silent-loss`,
+     `completion-mismatch`, `stuck-batch`.
+   - **Proxies down (machines off)**: high `proxy.totalProxyEvents`, and in `perf` a proxy/scraper
+     fn with high error rate. NB: do NOT claim "near timeout" from p99 alone — the scraper timeout is
+     900s, so a ~10s p99 with 100% errors means fast-fail (proxy refusal), not a timeout.
+   - **Cost / perf regressions**: `cost.byService` jumps; `perf[]` high error rate, throttles > 0,
+     p99 spikes; `overprovision` rows >80% (bump) or <35% (over-provisioned).
 4. Write `/tmp/insights.json` with this exact shape:
    ```json
    {
      "summary": "<one short paragraph, GREEK, plain language>",
      "findings": [
-       {"severity": "critical|warn|info", "title": "<short>", "detail": "<what + why + what to check, GREEK>"}
+       {"severity": "critical|warn|info", "project": "<project name, optional>", "title": "<short>", "detail": "<what + why + what to check, GREEK>"}
      ]
    }
    ```
+   - Set `project` to the exact project `name` from the pack (e.g. "Facebook Posts") so the finding
+     renders inside that project's card. Omit `project` only for account-wide findings (they go in
+     the top banner).
    - Only include findings that the numbers support. If all nominal, summary says so and findings = [].
    - Correlate signals into one finding where they share a cause (e.g. proxy bans + zero yield +
-     high duration → "proxies down").
+     high duration → "proxies down"; consumer-stall + never-processed + no-DLQ → "silent loss").
 5. Publish:
    `npm run --workspace routine publish -- /tmp/pack.json /tmp/insights.json`
    This renders the HTML, uploads to S3, presigns (7d), and posts the link to Slack.

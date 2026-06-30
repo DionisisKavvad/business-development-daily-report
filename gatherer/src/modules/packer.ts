@@ -1,5 +1,6 @@
 import { putJson } from '../lib/s3';
 import { ProgressSummary } from './progress';
+import { Coverage } from './coverage';
 import { BaselineSummary } from './baseline';
 import { QueueMetrics } from './queue';
 import { BalanceResult } from './balance';
@@ -23,6 +24,8 @@ export interface ProjectPack {
   runStartMs?: number;
   dayNumber?: number;
   progress?: ProgressSummary;
+  /** store-level coverage of the current (active) run */
+  coverage?: Coverage;
   baseline: BaselineSummary | null;
   queues: QueueMetrics[];
   balance: BalanceResult[];

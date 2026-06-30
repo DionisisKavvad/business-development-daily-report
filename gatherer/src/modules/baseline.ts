@@ -1,6 +1,7 @@
 import { latestEvent, latestEventBefore } from '../lib/dynamo';
 import { getJson, putJson } from '../lib/s3';
 import { computeProgress } from './progress';
+import { computeCoverage, Coverage } from './coverage';
 import { ProjectConfig } from '../projects';
 
 /**
@@ -18,6 +19,8 @@ export interface BaselineSummary {
   yields: { key: string; label: string; total: number; perStore: number | null }[];
   errors: { key: string; label: string; count: number }[];
   errorRate: number | null;
+  /** frozen store-level coverage of this completed run */
+  coverage: Coverage;
   frozenAt: number;
 }
 
@@ -28,21 +31,27 @@ function baselineKey(app: string): string {
 /** Find the most recent completed run's [startMs, endMs] for a project, or null. */
 export async function getLastCompletedRun(
   project: ProjectConfig
-): Promise<{ startMs: number; endMs: number; runId?: string } | null> {
+): Promise<{ startMs: number; endMs: number; runId?: string; universe: number | null } | null> {
   const completed = await latestEvent(project.app, project.runCompleted);
   if (!completed) return null;
   const endMs: number = completed.timestamp;
   const start = await latestEventBefore(project.app, project.runStarted, endMs);
   if (!start) return null;
-  return { startMs: start.timestamp, endMs, runId: completed.properties?.runId };
+  const universe =
+    typeof start.properties?.totalStores === 'number' ? start.properties.totalStores : null;
+  return { startMs: start.timestamp, endMs, runId: completed.properties?.runId, universe };
 }
 
 async function computeBaseline(
   project: ProjectConfig,
   startMs: number,
-  endMs: number
+  endMs: number,
+  universe: number | null
 ): Promise<BaselineSummary> {
-  const p = await computeProgress(project, startMs, endMs);
+  const [p, coverage] = await Promise.all([
+    computeProgress(project, startMs, endMs),
+    computeCoverage(project, startMs, endMs, universe),
+  ]);
   return {
     app: project.app,
     runStartMs: startMs,
@@ -51,6 +60,7 @@ async function computeBaseline(
     yields: p.yields,
     errors: p.errors,
     errorRate: p.errorRate,
+    coverage,
     frozenAt: Date.now(),
   };
 }
@@ -67,11 +77,11 @@ export async function ensureBaseline(project: ProjectConfig): Promise<BaselineSu
   if (!last) return null;
 
   const existing = await getJson<BaselineSummary>(baselineKey(project.app));
-  if (existing && existing.runStartMs === last.startMs) {
+  if (existing && existing.runStartMs === last.startMs && existing.coverage) {
     return existing;
   }
 
-  const fresh = await computeBaseline(project, last.startMs, last.endMs);
+  const fresh = await computeBaseline(project, last.startMs, last.endMs, last.universe);
   await putJson(baselineKey(project.app), fresh);
   return fresh;
 }

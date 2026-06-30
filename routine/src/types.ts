@@ -9,6 +9,15 @@ export interface YieldRatio {
   perStore: number | null;
 }
 
+export interface Coverage {
+  universe: number | null;
+  processedDistinct: number;
+  processedEvents: number;
+  reprocessRatio: number | null;
+  neverProcessed: number | null;
+  measurable: boolean;
+}
+
 export interface ProjectPack {
   name: string;
   app: string;
@@ -23,14 +32,25 @@ export interface ProjectPack {
     errorRate: number | null;
     dailyBreakdown: { date: string; storesCompleted: number; primaryYield: number; errors: number }[];
   };
+  coverage?: Coverage;
   baseline: {
     runStartMs: number;
     runEndMs: number;
     storesCompleted: number;
     yields: YieldRatio[];
     errorRate: number | null;
+    coverage?: Coverage;
   } | null;
-  queues: { queue: string; sent: number; deleted: number; visibleMax: number | null; oldestAgeSec: number | null }[];
+  queues: {
+    queue: string;
+    sent: number;
+    deleted: number;
+    visibleMax: number | null;
+    oldestAgeSec: number | null;
+    retentionSec?: number | null;
+    cliffDays?: number | null;
+    dlq?: boolean | null;
+  }[];
   balance: {
     queue: string;
     sent: number;
@@ -84,5 +104,7 @@ export interface Insights {
     severity: 'info' | 'warn' | 'critical';
     title: string;
     detail: string;
+    /** optional project name to attribute the finding to a card (else shown in the banner) */
+    project?: string;
   }[];
 }
